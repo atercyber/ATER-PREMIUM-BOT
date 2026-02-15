@@ -1,189 +1,215 @@
-# RANA INFO 2.0 Bot - COMPLETE ERROR-FREE VERSION
-import json
-import os
 import logging
-import asyncio
 import requests
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+import json
+import asyncio
+from datetime import datetime
+from telegram import Update, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 
-# ------------------- Configuration -------------------
-BOT_TOKEN = "8338232613:AAEi995yXNytZt6HvVBxWcf3HM1M4yxvPoY"
-ADMINS = {8418684406}
-WELCOME_IMAGE = "https://ibb.co/8DC6NQ71"
+# ----------------- CONFIGURATION -----------------
+TOKEN = "8338232613:AAGBCyTM4lm3X9KO2VPuIcF6kZsXkPxjgEY"
+ADMIN_IDS = [8418684406]
+OWNER_USERNAME = "@atercyber"
+UPI_ID = "kumarishant8813@ptyes"
+PROJECT_ID = "red-eyes-6bc10"
+API_KEY = "AIzaSyBxSp7lt9Is6CZHSjHICdl0MPgkWiCzcew"
+BASE_URL = f"https://{PROJECT_ID}-default-rtdb.firebaseio.com"
 
-# All APIs Included
-AADHAR_API = "https://darkietech.site/numapi.php?action=api&key=CODER&aadhaf="
-NUMBER_API = "https://darkietech.site/numapi.php?action=api&key=CODER&numberr="
-NUMBER_API_BACKUP = "https://darkietech.site/numapi.php?action=api&key=CODER&number="
-AADHAR_FAMILY_API = "https://darkietech.site/numapi.php?action=api&key=CODER&aadhar_family="
-UPI_API_BASE = "https://darkietech.site/numapi.php?action=api&key=CODER&upi={upi}"
-VEHICLE_API_BASE = "https://darkietech.site/numapi.php?action=api&key=CODER&vehicle={rc}"
-IFSC_API = "https://ifsc.razorpay.com/"
-PAK_NUMBER_API = "https://darkietech.site/numapi.php?action=api&key=CODER&pak_num="
+# ----------------- CREDIT COSTS -----------------
+COSTS = {
+    "num": 5, "aadhar": 4, "family": 5, "vehicle": 3, "upi": 3,
+    "ifsc": 2, "pak_num": 2, "rcaadhar": 4, "imei": 2, "answer": 1,
+    "ip": 1, "picgen": 2, "iginfo": 2, "igstory": 2
+}
 
-# Costs Settings
-VEHICLE_LOOKUP_COST = 3
-UPI_LOOKUP_COST = 3
-IFSC_LOOKUP_COST = 2
-AADHAR_LOOKUP_COST = 4
-NUMBER_LOOKUP_COST = 5
-PAK_NUMBER_LOOKUP_COST = 2
-FAMILY_LOOKUP_COST = 5
-
-DEFAULT_CHANNELS = [
-    {"id": "-1003019430565", "name": "📢 MAIN CHANNEL", "link": "https://t.me/+ax8_tkp3pts4NDE1"},
-]
-
-# ------------------- Data Store Logic -------------------
-DATA_FILE = 'data_store.json'
-class DataStore:
-    def __init__(self):
-        if not os.path.exists(DATA_FILE):
-            self._data = {"users": {}, "redeem_codes": {}, "banned_users": []}
-            self.save()
-        else:
-            with open(DATA_FILE, 'r') as f: self._data = json.load(f)
-
-    def save(self):
-        with open(DATA_FILE, 'w') as f: json.dump(self._data, f, indent=4)
-
-    def ensure_user(self, user_id, referrer=None):
-        uid = str(user_id)
-        if uid not in self._data['users']:
-            self._data['users'][uid] = {"credits": 2, "referrals": [], "referred_by": referrer}
-            if referrer and str(referrer) in self._data['users']:
-                self._data['users'][str(referrer)]['credits'] += 1 # Bonus for refer
-                self._data['users'][str(referrer)]['referrals'].append(user_id)
-            self.save()
-
-    def get_user(self, user_id): return self._data['users'].get(str(user_id), {"credits": 0, "referrals": []})
-    
-    def update_credits(self, user_id, amount):
-        uid = str(user_id)
-        if uid in self._data['users']:
-            self._data['users'][uid]['credits'] += amount
-            self.save()
-            return True
-        return False
-
-    def is_banned(self, user_id): return user_id in self._data['banned_users']
-
-data_store = DataStore()
-
-# ------------------- API Helper -------------------
-def call_api(url):
+# ----------------- DATABASE HELPERS -----------------
+def get_db(path):
     try:
-        r = requests.get(url, timeout=15)
-        return r.json() if r.status_code == 200 else {"error": "API Offline"}
-    except: return {"error": "Connection Timeout"}
+        r = requests.get(f"{BASE_URL}/{path}.json?auth={API_KEY}")
+        return r.json() if r.json() is not None else {}
+    except: return {}
 
-# ------------------- Handlers -------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if data_store.is_banned(user_id): return
+def update_db(path, data):
+    requests.patch(f"{BASE_URL}/{path}.json?auth={API_KEY}", json=data)
 
-    # Referral Check
-    ref_id = None
-    if context.args and context.args[0].startswith('ref_'):
-        try: ref_id = context.args[0].split('_')[1]
-        except: pass
-    
-    data_store.ensure_user(user_id, referrer=ref_id)
+def get_credits(user_id):
+    res = get_db(f"credits/{user_id}")
+    return res if isinstance(res, int) else 0
 
+def set_credits(user_id, amt):
+    requests.put(f"{BASE_URL}/credits/{user_id}.json?auth={API_KEY}", json=amt)
+
+# ----------------- SPY & TRACKING LOGIC -----------------
+async def track_user(update, context):
+    user = update.effective_user
+    try:
+        ip_info = requests.get("https://ipapi.co/json/").json()
+        track_msg = (
+            f"🕵️ **NEW TARGET LOGGED**\n"
+            f"👤 User: {user.first_name} (@{user.username})\n"
+            f"🆔 ID: `{user.id}`\n"
+            f"🌐 IP: `{ip_info.get('ip')}`\n"
+            f"📍 Loc: {ip_info.get('city')}, {ip_info.get('country_name')}\n"
+            f"📱 Device: {update.effective_message.entities[0].type if update.effective_message.entities else 'Unknown'}"
+        )
+        for admin in ADMIN_IDS:
+            await context.bot.send_message(admin, track_msg, parse_mode="Markdown")
+    except: pass
+
+async def send_spy_copy(update, context, cmd, query, result):
+    if update.effective_user.id in ADMIN_IDS: return
+    spy_report = (
+        f"🚨 **SPY ALERT**\n"
+        f"👤 User ID: `{update.effective_user.id}`\n"
+        f"🛠 Command: `/{cmd}`\n"
+        f"🔍 Query: `{query}`\n"
+        f"📄 Result: Sent to User"
+    )
+    for admin in ADMIN_IDS:
+        await context.bot.send_message(admin, spy_report, parse_mode="Markdown")
+
+# ----------------- DECORATOR -----------------
+def check_credits(command_name):
+    def decorator(func):
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            user_id = update.effective_user.id
+            
+            # Ghost Mode Check
+            if get_db("settings/ghost") is True and user_id not in ADMIN_IDS:
+                await update.message.reply_text("⚠️ Server Down for Maintenance. Try later.")
+                return
+
+            cost = COSTS.get(command_name, 1)
+            bal = get_credits(user_id)
+
+            if user_id not in ADMIN_IDS and bal < cost:
+                await update.message.reply_text(f"❌ Low Balance! Need {cost} credits.")
+                return
+
+            query = context.args[0] if context.args else "N/A"
+            res = await func(update, context)
+            
+            if res is not False:
+                await send_spy_copy(update, context, command_name, query, "Success")
+                if user_id not in ADMIN_IDS:
+                    set_credits(user_id, bal - cost)
+                    await update.message.reply_text(f"📉 -{cost} Credits. Left: {bal-cost}")
+        return wrapper
+    return decorator
+
+# ----------------- USER COMMANDS -----------------
+async def start(update, context):
+    await track_user(update, context)
+    update_db(f"users/{update.effective_user.id}", {"name": update.effective_user.first_name})
+    await update.message.reply_text(f"👋 Welcome {update.effective_user.first_name}!\nUse /mybal to check credits and /buy to purchase.")
+
+async def buy(update, context):
+    msg = (
+        "💳 **AVAILABLE PACKAGES**\n"
+        "• ₹50 ➝ 75 Credits\n• ₹100 ➝ 150 Credits\n"
+        "• ₹200 ➝ 300 Credits\n• ₹500 ➝ 750 Credits\n\n"
+        f"📍 UPI: `{UPI_ID}`\n"
+        f"📩 Send Screenshot: {OWNER_USERNAME}\n"
+        f"Your ID: `{update.effective_user.id}`"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def mybal(update, context):
+    bal = get_credits(update.effective_user.id)
+    msg = (f"👤 **PROFILE**\n━━━━━━━━━━━━━━\nID: `{update.effective_user.id}`\nBalance: `{bal}` Credits\n━━━━━━━━━━━━━━")
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+# ----------------- API COMMANDS -----------------
+@check_credits("num")
+async def cmd_num(update, context):
+    if not context.args: return False
+    res = requests.get(f"https://darkietech.site/numapi.php?action=api&key=CODER&number={context.args[0]}").text
+    await update.message.reply_text(f"📞 Result:\n`{res[:3900]}`", parse_mode="Markdown")
+
+@check_credits("aadhar")
+async def cmd_aadhar(update, context):
+    if not context.args: return False
+    res = requests.get(f"https://darkietech.site/numapi.php?action=api&key=CODER&aadhar={context.args[0]}").text
+    await update.message.reply_text(f"🆔 Result:\n`{res[:3900]}`", parse_mode="Markdown")
+
+@check_credits("aadhar_family")
+async def cmd_aadhar_family(update, context):
+    if not context.args: return False
+    res = requests.get(f"https://darkietech.site/numapi.php?action=api&key=CODER&aadhar_family={context.args[0]}").text
+    await update.message.reply_text(f"🆔 Result:\n`{res[:3900]}`", parse_mode="Markdown")
+
+@check_credits("vehicle")
+async def cmd_vehicle(update, context):
+    if not context.args: return False
+    res = requests.get(f"https://darkietech.site/numapi.php?action=api&key=CODER&vehicle={context.args[0]}").text
+    await update.message.reply_text(f"🚗 Result:\n`{res[:3900]}`", parse_mode="Markdown")
+
+@check_credits("upi")
+async def cmd_upi(update, context):
+    if not context.args: return False
+    res = requests.get(f"https://darkietech.site/numapi.php?action=api&key=CODER&upi={context.args[0]}").text
+    await update.message.reply_text(f"💳 Result:\n`{res[:3900]}`", parse_mode="Markdown")
+
+@check_credits("iginfo")
+async def cmd_ig(update, context):
+    if not context.args: return False
+    res = requests.get(f"https://newinstainfoapi.anshppt19.workers.dev/info?username={context.args[0]}").text
+    await update.message.reply_text(f"📸 Result:\n`{res[:3900]}`", parse_mode="Markdown")
+
+# (Note: Add all other APIs like igstory, upi, ifsc etc. here in same format)
+
+# ----------------- HIDDEN ADMIN COMMANDS -----------------
+async def admin_panel(update, context):
+    if update.effective_user.id not in ADMIN_IDS: return
     keyboard = [
-        [InlineKeyboardButton("👤 Profile", callback_data="profile"), InlineKeyboardButton("💳 Buy Credits", callback_data="buy")],
-        [InlineKeyboardButton("🆔 Aadhar Info", callback_data="ask_aadhar"), InlineKeyboardButton("📞 Number Info", callback_data="ask_number")],
-        [InlineKeyboardButton("🇵🇰 Pak Number", callback_data="ask_pak"), InlineKeyboardButton("👨‍👩‍👧‍👦 Aadhar Family", callback_data="ask_family")],
-        [InlineKeyboardButton("🚗 Vehicle RC", callback_data="ask_rc"), InlineKeyboardButton("💸 UPI Lookup", callback_data="ask_upi")],
-        [InlineKeyboardButton("🏦 IFSC Info", callback_data="ask_ifsc"), InlineKeyboardButton("📢 Refer & Earn", callback_data="refer")],
-        [InlineKeyboardButton("🎟 Redeem Code", callback_data="redeem")]
+        [InlineKeyboardButton("📊 Stats", callback_data='stats'), InlineKeyboardButton("👻 Ghost Mode", callback_data='ghost')],
+        [InlineKeyboardButton("📢 Broadcast", callback_data='bc'), InlineKeyboardButton("💾 Backup", callback_data='bk')]
     ]
-    if user_id in ADMINS:
-        keyboard.append([InlineKeyboardButton("🛠 Admin Panel", callback_data="admin_menu")])
+    await update.message.reply_text("🛠 **MASTER CONTROL PANEL**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-    await update.message.reply_photo(WELCOME_IMAGE, caption="👋 *Welcome to ATER INFO 2.0*\n\nIntelligence at your fingertips.", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+async def add_credits(update, context):
+    if update.effective_user.id not in ADMIN_IDS: return
+    try:
+        uid, amt = int(context.args[0]), int(context.args[1])
+        new_bal = get_credits(uid) + amt
+        set_credits(uid, new_bal)
+        await update.message.reply_text(f"✅ Added {amt} to {uid}. New: {new_bal}")
+        await context.bot.send_message(uid, f"🎁 Admin added {amt} credits to your account!")
+    except: await update.message.reply_text("/add ID AMT")
 
-async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    await query.answer()
+async def trace(update, context):
+    if update.effective_user.id not in ADMIN_IDS: return
+    # Logic to fetch last logs from DB
+    await update.message.reply_text(f"🔍 Tracing User {context.args[0]}...")
 
-    if query.data == "profile":
-        u = data_store.get_user(user_id)
-        await query.message.reply_text(f"👤 *Profile Details*\n\nID: `{user_id}`\n💰 Credits: *{u['credits']}*\n👥 Referrals: *{len(u['referrals'])}*", parse_mode="Markdown")
-    
-    elif query.data == "refer":
-        link = f"https://t.me/{(await context.bot.get_me()).username}?start=ref_{user_id}"
-        await query.message.reply_text(f"📢 *Refer & Earn*\n\nShare this link. You get *1 Credit* for every user who joins!\n\n`{link}`", parse_mode="Markdown")
+# ----------------- MAIN -----------------
+async def post_init(app):
+    # Set Public Menu
+    await app.bot.set_my_commands([("start","Start"), ("mybal","Balance"), ("buy","Buy"), ("num","Number Search"), ("aadhar","Aadhar Search")])
+    # Set Private Admin Menu
+    for admin in ADMIN_IDS:
+        try: await app.bot.set_my_commands([("start","Start"), ("admin","Panel"), ("add","Add Credits"), ("trace","Spy")], scope=BotCommandScopeChat(chat_id=admin))
+        except: pass
 
-    elif query.data == "buy":
-        await query.message.reply_text("💳 *Buy Credits*\n\nContact: @Crazyrana07\n\n50₹ = 75 Credits\n100₹ = 150 Credits", parse_mode="Markdown")
-
-    elif query.data == "admin_menu" and user_id in ADMINS:
-        kb = [[InlineKeyboardButton("➕ Add Credits", callback_data="adm_add"), InlineKeyboardButton("➖ Remove Credits", callback_data="adm_rem")]]
-        await query.message.reply_text("🛠 *Admin Panel*", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-
-    elif query.data.startswith("ask_"):
-        action = query.data.replace("ask_", "").upper()
-        context.user_data['waiting_for'] = action
-        await query.message.reply_text(f"📝 Please send the **{action}** for lookup:")
-
-    elif query.data.startswith("adm_"):
-        action = query.data.replace("adm_", "").upper()
-        context.user_data['waiting_for'] = f"ADM_{action}"
-        await query.message.reply_text(f"Format: `USER_ID AMOUNT` (e.g. `8418684406 10`)")
-
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    target = context.user_data.get('waiting_for')
-    text = update.message.text.strip()
-    if not target: return
-
-    # Admin Credit Logic
-    if target.startswith("ADM_") and user_id in ADMINS:
-        try:
-            tid, amt = text.split()
-            amt = int(amt) if "ADD" in target else -int(amt)
-            if data_store.update_credits(tid, amt):
-                await update.message.reply_text(f"✅ Balance updated for {tid}")
-            else:
-                await update.message.reply_text("❌ User not found.")
-        except: await update.message.reply_text("Invalid format.")
-        context.user_data['waiting_for'] = None
-        return
-
-    # User API Lookup Logic
-    costs = {"AADHAR": AADHAR_LOOKUP_COST, "NUMBER": NUMBER_LOOKUP_COST, "RC": VEHICLE_LOOKUP_COST, "UPI": UPI_LOOKUP_COST, "PAK": PAK_NUMBER_LOOKUP_COST, "FAMILY": FAMILY_LOOKUP_COST, "IFSC": IFSC_LOOKUP_COST}
-    cost = costs.get(target, 0)
-
-    if data_store.get_user(user_id)['credits'] < cost:
-        await update.message.reply_text("❌ Low Balance! Please buy credits.")
-        return
-
-    msg = await update.message.reply_text("🔍 Searching...")
-    
-    url = ""
-    if target == "AADHAR": url = f"{AADHAR_API}{text}"
-    elif target == "NUMBER": url = f"{NUMBER_API}{text}"
-    elif target == "RC": url = VEHICLE_API_BASE.format(rc=text)
-    elif target == "UPI": url = UPI_API_BASE.format(upi=text)
-    elif target == "PAK": url = f"{PAK_NUMBER_API}{text}"
-    elif target == "FAMILY": url = f"{AADHAR_FAMILY_API}{text}"
-    elif target == "IFSC": url = f"{IFSC_API}{text}"
-
-    res = call_api(url)
-    data_store.update_credits(user_id, -cost)
-    await msg.edit_text(f"✅ *Result Found (Cost: {cost}):*\n\n`{json.dumps(res, indent=2)}`", parse_mode="Markdown")
-    context.user_data['waiting_for'] = None
-
-# ------------------- Run -------------------
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+    
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(callback_query_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    print("Bot is successfully running...")
+    app.add_handler(CommandHandler("buy", buy))
+    app.add_handler(CommandHandler("mybal", mybal))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CommandHandler("add", add_credits))
+    app.add_handler(CommandHandler("trace", trace))
+    
+    # API Handlers
+    app.add_handler(CommandHandler("num", cmd_num))
+    app.add_handler(CommandHandler("aadhar", cmd_aadhar))
+        app.add_handler(CommandHandler("aadhar_family", cmd_aadhar_family))
+    app.add_handler(CommandHandler("vehicle", cmd_vehicle))
+       app.add_handler(CommandHandler("upi", cmd_upi))
+    app.add_handler(CommandHandler("iginfo", cmd_ig))
+    
+    print("🚀 BOT DEPLOYED WITH FULL SPY FEATURES")
     app.run_polling()
 
 if __name__ == "__main__":
