@@ -132,7 +132,7 @@ async def cmd_aadhar(update, context):
     res = requests.get(f"https://darkietech.site/numapi.php?action=api&key=CODER&aadhar={context.args[0]}").text
     await update.message.reply_text(f"🆔 Result:\n`{res[:3900]}`", parse_mode="Markdown")
 
-@check_credits("aadhar_family")
+@check_credits("family")
 async def cmd_aadhar_family(update, context):
     if not context.args: return False
     res = requests.get(f"https://darkietech.site/numapi.php?action=api&key=CODER&aadhar_family={context.args[0]}").text
@@ -156,8 +156,6 @@ async def cmd_ig(update, context):
     res = requests.get(f"https://newinstainfoapi.anshppt19.workers.dev/info?username={context.args[0]}").text
     await update.message.reply_text(f"📸 Result:\n`{res[:3900]}`", parse_mode="Markdown")
 
-# (Note: Add all other APIs like igstory, upi, ifsc etc. here in same format)
-
 # ----------------- HIDDEN ADMIN COMMANDS -----------------
 async def admin_panel(update, context):
     if update.effective_user.id not in ADMIN_IDS: return
@@ -179,21 +177,21 @@ async def add_credits(update, context):
 
 async def trace(update, context):
     if update.effective_user.id not in ADMIN_IDS: return
-    # Logic to fetch last logs from DB
     await update.message.reply_text(f"🔍 Tracing User {context.args[0]}...")
 
 # ----------------- MAIN -----------------
 async def post_init(app):
-    # Set Public Menu
     await app.bot.set_my_commands([("start","Start"), ("mybal","Balance"), ("buy","Buy"), ("num","Number Search"), ("aadhar","Aadhar Search")])
-    # Set Private Admin Menu
     for admin in ADMIN_IDS:
-        try: await app.bot.set_my_commands([("start","Start"), ("admin","Panel"), ("add","Add Credits"), ("trace","Spy")], scope=BotCommandScopeChat(chat_id=admin))
-        except: pass
+        try: 
+            await app.bot.set_my_commands([("start","Start"), ("admin","Panel"), ("add","Add Credits"), ("trace","Spy")], scope=BotCommandScopeChat(chat_id=admin))
+        except: 
+            pass
 
 def main():
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     
+    # Handlers अलाइनमेंट सही किया गया
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("buy", buy))
     app.add_handler(CommandHandler("mybal", mybal))
@@ -201,12 +199,12 @@ def main():
     app.add_handler(CommandHandler("add", add_credits))
     app.add_handler(CommandHandler("trace", trace))
     
-    # API Handlers
+    # API Handlers अलाइनमेंट सही किया गया
     app.add_handler(CommandHandler("num", cmd_num))
     app.add_handler(CommandHandler("aadhar", cmd_aadhar))
-        app.add_handler(CommandHandler("aadhar_family", cmd_aadhar_family))
+    app.add_handler(CommandHandler("aadhar_family", cmd_aadhar_family))
     app.add_handler(CommandHandler("vehicle", cmd_vehicle))
-       app.add_handler(CommandHandler("upi", cmd_upi))
+    app.add_handler(CommandHandler("upi", cmd_upi))
     app.add_handler(CommandHandler("iginfo", cmd_ig))
     
     print("🚀 BOT DEPLOYED WITH FULL SPY FEATURES")
